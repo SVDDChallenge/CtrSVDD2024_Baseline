@@ -30,7 +30,9 @@ class SVDD2024(Dataset):
             speckwargs={"n_fft": 512, "win_length": 320, "hop_length": 160, "center": False},
         )
 
-        self.df = pd.read_csv(os.path.join(root_dir, partition + "_set.txt"), names=["original dataset", "singer", "filename", "-", "SVS/SVC methods", "label"])
+        self.df = pd.read_csv(os.path.join(root_dir, partition + ".txt"), 
+        names=["original dataset", "singer", "filename", "-", "SVS/SVC methods", "label"], sep=" ")
+        print(self.df.head())
 
     def __len__(self):
         return len(self.df)
@@ -38,7 +40,7 @@ class SVDD2024(Dataset):
     def __getitem__(self, index):
         # read audio
         filename = self.df.iloc[index]["filename"]
-        filepath = os.path.join(self.root_dir, filename + ".flac")
+        filepath = os.path.join(self.root_dir, self.partition + "_set", filename + ".flac")
         label = self.df.iloc[index]["label"]
         if label == "bonafide":
             label = 0

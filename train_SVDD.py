@@ -194,19 +194,16 @@ def train(args):
     feat_optimizer = torch.optim.Adam(feat_model.parameters(), lr=args.lr,
                                       betas=(args.beta_1, args.beta_2), eps=args.eps, weight_decay=0.0005)
 
-    # train_val_set = OpencpopACESinger(partition="train", target_sr=16000)
-    # training_set, validation_set = torch.utils.data.random_split(train_val_set, \
-    #                                [int(0.8 * len(train_val_set)), len(train_val_set) - int(0.8 * len(train_val_set))])
     training_set = SVDD2024(partition="train", target_sr=16000)
     validation_set = SVDD2024(partition="dev", target_sr=16000)
 
     trainDataLoader = DataLoader(training_set, batch_size=args.batch_size,
                                  shuffle=True, num_workers=args.num_workers)
     valDataLoader = DataLoader(validation_set, batch_size=args.batch_size,
-                               shuffle=True, num_workers=args.num_workers)
+                               shuffle=False, num_workers=args.num_workers)
 
-    test_set = SVDD2024(partition="test", target_sr=16000)
-    testDataLoader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    # test_set = SVDD2024(partition="test", target_sr=16000)
+    # testDataLoader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     feat, _ = training_set[23]
     print("Feature shape", feat.shape)
@@ -308,17 +305,17 @@ def train(args):
         summary_writer.add_scalar('val_loss', np.nanmean(devlossDict[monitor_loss]), epoch_num)
         summary_writer.add_scalar('val_eer', eer, epoch_num)
 
-        if args.test_on_eval:
-            if (epoch_num + 1) % args.test_interval == 0:
-                eer, testlossDict = val_one_epoch(testDataLoader, feat_model, loss_model, args)
+        # if args.test_on_eval:
+        #     if (epoch_num + 1) % args.test_interval == 0:
+        #         eer, testlossDict = val_one_epoch(testDataLoader, feat_model, loss_model, args)
 
-                with open(os.path.join(args.out_fold, "test_loss.log"), "a") as log:
-                    log.write(str(epoch_num) + "\t" + str(np.nanmean(testlossDict[monitor_loss])) + "\t" + str(eer) + "\n")
-                wandb.log({"test_loss": np.nanmean(testlossDict[monitor_loss])})
-                print("Test EER: {}".format(eer))
-                wandb.log({"test_eer": eer})
-                summary_writer.add_scalar('eval_loss', np.nanmean(testlossDict[monitor_loss]), epoch_num)
-                summary_writer.add_scalar('eval_eer', eer, epoch_num)
+        #         with open(os.path.join(args.out_fold, "test_loss.log"), "a") as log:
+        #             log.write(str(epoch_num) + "\t" + str(np.nanmean(testlossDict[monitor_loss])) + "\t" + str(eer) + "\n")
+        #         wandb.log({"test_loss": np.nanmean(testlossDict[monitor_loss])})
+        #         print("Test EER: {}".format(eer))
+        #         wandb.log({"test_eer": eer})
+        #         summary_writer.add_scalar('eval_loss', np.nanmean(testlossDict[monitor_loss]), epoch_num)
+        #         summary_writer.add_scalar('eval_eer', eer, epoch_num)
 
 
         valLoss = np.nanmean(devlossDict[monitor_loss])
