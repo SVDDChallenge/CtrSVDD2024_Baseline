@@ -48,7 +48,7 @@ class SVDD2024(Dataset):
             file = self.file_list[index]
             file_name = file.split(" ")[2].strip()
             bonafide_or_spoof = file.split(" ")[-1].strip()
-            label = 0 if bonafide_or_spoof == "bonafide" else 1
+            label = 1 if bonafide_or_spoof == "bonafide" else 0
         try:
             x, _ = librosa.load(os.path.join(self.base_dir, file_name + ".flac"), sr=16000, mono=True)
             x = pad_random(x, self.max_len)
