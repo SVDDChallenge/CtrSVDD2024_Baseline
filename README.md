@@ -3,7 +3,7 @@ This repository contains the baseline system implementations for the SVDD Challe
 
 # Updates
 - March 12, 2024: Since during baseline training, our code contains flipped labels, you need to manually flip the sign of the predicted scores if you are only inferencing from our provided baseline systems. To do so, please add a line in `eval.py` after 31: `pred *= -1.0`.
-- March 6, 2024: We update training logs in `weights/training_logs`. You could see them using tensorboard. Also, we realize our training code contains flipped labels (the bonafides are labeled as 0, not 1). The code has been fixed to reflect the correct implementation. EER may change slightly due to this.
+- March 6, 2024: We update training logs in `weights/training_logs`. You could see them using tensorboard (see 'Visualize Training Logs of Provided Baseline Systems'). Also, we realize our training code contains flipped labels (the bonafides are labeled as 0, not 1). The code has been fixed to reflect the correct implementation. EER may change slightly due to this.
 
 # Getting Started
 
@@ -27,3 +27,12 @@ python eval.py --base_dir {Where the data is} --model_path {The model's weights 
 The main functions in `train` and `eval` specify more options that you can tune. 
 
 Within `base_dir`, the code expects to see `train_set`, `dev_set` and `test_set` directories, along with `train.txt` and `dev.txt` as open-sourced. `train_set`, `dev_set` and `test_set` should directly contain `*.flac` files.
+
+# Visualize Training Logs of Provided Baseline Systems
+Run the following command within the CtrSVDD2024_Baseline directory.
+
+```bash
+pip install tensorboard
+tensorboard --logdir weights/training_logs
+```
+
