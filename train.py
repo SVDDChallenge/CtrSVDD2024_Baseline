@@ -35,6 +35,11 @@ def main(args):
     
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
 
+    # resume-training flag, if set to True, the model, optimizer and scheduler will be loaded from the checkpoint
+    resume_training = False
+    if args.load_from is not None:
+        resume_training = True
+
     # Create the dataset
     path = args.base_dir
     train_dataset = SVDD2024(path, partition="train")
@@ -45,15 +50,26 @@ def main(args):
     
     # Create the model
     model = SVDDModel(device, frontend=args.encoder).to(device)
+    # print("Model created")
+    # print(model)
 
     # Create the optimizer
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-9, betas=(0.9, 0.999))
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
+    start_epoch = 0
 
-    # Create the directory for the logs
-    log_dir = os.path.join(args.log_dir, args.encoder)
-    os.makedirs(log_dir, exist_ok=True)
-    
+    if resume_training:
+        model_state = torch.load(os.path.join(args.load_from, "checkpoints", "model_state.pt"))
+        model.load_state_dict(model_state['model_state_dict'])
+        optimizer.load_state_dict(model_state['optimizer_state_dict'])
+        scheduler.load_state_dict(model_state['scheduler_state_dict'])
+        start_epoch = model_state['epoch']
+        log_dir = args.load_from
+    else:
+        # Create the directory for the logs
+        log_dir = os.path.join(args.log_dir, args.encoder)
+        os.makedirs(log_dir, exist_ok=True)
+        
     # get current time
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = os.path.join(log_dir, current_time)
@@ -75,13 +91,13 @@ def main(args):
     best_val_eer = 1.0
 
     # Train the model
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         pos_samples, neg_samples = [], []
         for i, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}")):
-            if args.debug and i > 20:
+            if args.debug and i > 100:
                 break
-            x, label, _ = batch
+            x, label, filenames = batch
             x = x.to(device)
             label = label.to(device)
             soft_label = label.float() * 0.9 + 0.05
@@ -96,16 +112,24 @@ def main(args):
         scheduler.step()
         writer.add_scalar("LR/train", scheduler.get_last_lr()[0], epoch * len(train_loader) + i)
         writer.add_scalar("EER/train", compute_eer(np.concatenate(pos_samples), np.concatenate(neg_samples))[0], epoch)
-        
+        # save training state
+        model_state = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'loss': loss,
+        }
+        torch.save(model_state, os.path.join(checkpoint_dir, f"model_state.pt"))
         
         model.eval()
         val_loss = 0
         pos_samples, neg_samples = [], []
         with torch.no_grad():
             for i, batch in enumerate(tqdm(dev_loader, desc=f"Validation")):
-                if args.debug and i > 20:
+                if args.debug and i > 100:
                     break
-                x, label, _ = batch
+                x, label, filenames = batch
                 x = x.to(device)
                 label = label.to(device)
                 _, pred = model(x)
@@ -121,6 +145,19 @@ def main(args):
             if val_eer < best_val_eer:
                 best_val_eer = val_eer
                 torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"best_model.pt"))
+                pos_samples, neg_samples = [], []
+                with torch.no_grad():
+                    for i, batch in enumerate(tqdm(test_loader, desc=f"Testing")):
+                        x, label, filenames = batch
+                        x = x.to(device)
+                        label = label.to(device)
+                        _, pred = model(x)
+                        pos_samples.append(pred[label == 1].detach().cpu().numpy())
+                        neg_samples.append(pred[label == 0].detach().cpu().numpy())
+                    test_eer = compute_eer(np.concatenate(pos_samples), np.concatenate(neg_samples))[0]
+                    writer.add_scalar("EER/test", test_eer, epoch)
+                    with open(os.path.join(log_dir, "test_eer.txt"), "w") as f:
+                        f.write(f"At epoch {epoch}: {test_eer * 100:.4f}%")
             if epoch % 10 == 0: # Save every 10 epochs
                 torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"model_{epoch}_EER_{val_eer}.pt"))
 
@@ -134,6 +171,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=24, help="The batch size for training.")
     parser.add_argument("--num_workers", type=int, default=6, help="The number of workers for the data loader.")
     parser.add_argument("--log_dir", type=str, default="logs", help="The directory for the logs.")
+    parser.add_argument("--load_from", type=str, default=None, help="The path to the checkpoint to load from.")
     
     args = parser.parse_args()
     main(args)

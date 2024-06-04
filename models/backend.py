@@ -433,6 +433,13 @@ class AASIST(nn.Module):
         }
         
         self.d_args = d_args
+        
+        self.attention = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=(1,1)),
+            nn.SELU(inplace=True),
+            nn.BatchNorm2d(128),
+            nn.Conv2d(128, 64, kernel_size=(1,1)),
+        )
 
         filts = d_args["filts"]
         gat_dims = d_args["gat_dims"]
@@ -484,16 +491,20 @@ class AASIST(nn.Module):
         self.out_layer = nn.Linear(5 * gat_dims[1], 1)
 
     def forward(self, x, Freq_aug=False):
+        x = self.attention(x)
         # spectral GAT (GAT-S)
-        e_S, _ = torch.max(torch.abs(x), dim=3)  # max along time
-        e_S = e_S.transpose(1, 2) + self.pos_S
+        # e_S, _ = torch.max(torch.abs(x), dim=3)  # max along time
+        w1 = F.softmax(x, dim=-1)
+        m1 = torch.sum(x * w1, dim=-1)
+        e_S = m1.transpose(1, 2) + self.pos_S
 
         gat_S = self.GAT_layer_S(e_S)
         out_S = self.pool_S(gat_S)  # (#bs, #node, #dim)
 
         # temporal GAT (GAT-T)
-        e_T, _ = torch.max(torch.abs(x), dim=2)  # max along freq
-        e_T = e_T.transpose(1, 2)
+        w2 = F.softmax(x, dim=-2)
+        m2 = torch.sum(x * w2, dim=-2)
+        e_T = m2.transpose(1, 2)
 
         gat_T = self.GAT_layer_T(e_T)
         out_T = self.pool_T(gat_T)

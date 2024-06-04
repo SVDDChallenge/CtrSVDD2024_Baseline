@@ -14,6 +14,12 @@ import torch.nn.functional as F
 import torchaudio
 from torch import Tensor
 from models.backend import AASIST
+try:
+    from s3prl.nn import S3PRLUpstream
+except NotFoundError:
+    S3PRLUpstream = None
+import fairseq
+import argparse
 
 
 class Residual_block(nn.Module):
@@ -182,7 +188,82 @@ class SincConv(nn.Module):
         # (#bs, #filt, #spec, #seq)
         x = self.encoder(x)
         return x
-   
+
+class Spectrogram(nn.Module):
+    def __init__(self, device, sample_rate=16000, n_fft=512, win_length=512, hop_length=160, power=2, normalized=True):
+        super(Spectrogram, self).__init__()
+        self.sample_rate = sample_rate
+        self.n_fft = n_fft
+        self.win_length = win_length
+        self.hop_length = hop_length
+        self.power = power
+        self.normalized = normalized
+        
+        filts = [70, [1, 32], [32, 32], [32, 64], [64, 64]]
+        
+        self.spec = torchaudio.transforms.Spectrogram(
+            n_fft=self.n_fft,
+            win_length=self.win_length,
+            hop_length=self.hop_length,
+            power=self.power,
+            normalized=self.normalized,
+        ).to(device)
+        
+        self.encoder = nn.Sequential(
+            nn.Sequential(Residual_block(nb_filts=filts[1], first=True)),
+            nn.Sequential(Residual_block(nb_filts=filts[2])),
+            nn.Sequential(Residual_block(nb_filts=filts[3])),
+            nn.Sequential(Residual_block(nb_filts=filts[4])),
+        )
+        
+        self.linear = nn.Linear((n_fft // 2 + 1) * 4, 23 * 29) # match the output shape of the rawnet encoder
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        x = self.spec(x)
+        x = self.encoder(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = self.linear(x)
+        x = x.view(x.size(0), x.size(1), 23, 29)
+        return x
+    
+class MelSpectrogram(nn.Module):
+    def __init__(self, device, sample_rate=16000, n_mels=80, n_fft=512, win_length=512, hop_length=160):
+        super(MelSpectrogram, self).__init__()
+        self.sample_rate = sample_rate
+        self.n_mels = n_mels
+        self.n_fft = n_fft
+        self.win_length = win_length
+        self.hop_length = hop_length
+        
+        filts = [70, [1, 32], [32, 32], [32, 64], [64, 64]]
+        
+        self.melspec = torchaudio.transforms.MelSpectrogram(
+            sample_rate=self.sample_rate,
+            n_mels=self.n_mels,
+            n_fft=self.n_fft,
+            win_length=self.win_length,
+            hop_length=self.hop_length,
+        ).to(device)
+        
+        self.encoder = nn.Sequential(
+            nn.Sequential(Residual_block(nb_filts=filts[1], first=True)),
+            nn.Sequential(Residual_block(nb_filts=filts[2])),
+            nn.Sequential(Residual_block(nb_filts=filts[3])),
+            nn.Sequential(Residual_block(nb_filts=filts[4])),
+        )
+        
+        self.linear = nn.Linear(n_mels * 4, 23 * 29) # match the output shape of the rawnet encoder
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        x = self.melspec(x)
+        x = self.encoder(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = self.linear(x)
+        x = x.view(x.size(0), x.size(1), 23, 29)
+        return x
+    
 class LFCC(nn.Module):
     def __init__(self, device, sample_rate=16000, n_filter=20, f_min=0.0, f_max=None, n_lfcc=60, dct_type=2, norm="ortho", log_lf=False, speckwargs={"n_fft": 512, "win_length": 512, "hop_length": 160, "center": False}):
         super(LFCC, self).__init__()
@@ -227,14 +308,147 @@ class LFCC(nn.Module):
         x = self.linear(x)
         x = x.view(x.size(0), x.size(1), 23, 29)
         return x
+    
+class MFCC(nn.Module):
+    def __init__(self, device, sample_rate=16000, n_mfcc=40, melkwargs={"n_fft": 512, "win_length": 512, "hop_length": 160, "center": False}):
+        super(MFCC, self).__init__()
+        self.device = device
+        self.sample_rate = sample_rate
+        self.n_mfcc = n_mfcc
+        self.melkwargs = melkwargs
+        
+        filts = [70, [1, 32], [32, 32], [32, 64], [64, 64]]
+        
+        self.mfcc = torchaudio.transforms.MFCC(
+            sample_rate=self.sample_rate,
+            n_mfcc=self.n_mfcc,
+            melkwargs=self.melkwargs,
+        ).to(device)
+        
+        self.encoder = nn.Sequential(
+            nn.Sequential(Residual_block(nb_filts=filts[1], first=True)),
+            nn.Sequential(Residual_block(nb_filts=filts[2])),
+            nn.Sequential(Residual_block(nb_filts=filts[3])),
+            nn.Sequential(Residual_block(nb_filts=filts[4])),
+        )
+        
+        self.linear = nn.Linear(n_mfcc * 4, 23 * 29) # match the output shape of the rawnet encoder
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        x = self.mfcc(x)
+        x = self.encoder(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = self.linear(x)
+        x = x.view(x.size(0), x.size(1), 23, 29)
+        return x
+    
+class SSLFrontend(nn.Module):
+    def __init__(self, device, model_label, model_dim):
+        super(SSLFrontend, self).__init__()
+        if model_label == "xlsr":
+            task_arg = argparse.Namespace(task='audio_pretraining')
+            task = fairseq.tasks.setup_task(task_arg)
+            # https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr2_300m.pt
+            model, _, _ = fairseq.checkpoint_utils.load_model_ensemble_and_task(['/root/xlsr2_300m.pt'], task=task)
+            self.model = model[0]
+        self.device = device
+        filts = [70, [1, 32], [32, 32], [32, 64], [64, 64]]
+
+        self.sample_rate = 16000 # only 16000 setting is supported
+        self.encoder = nn.Sequential(
+            nn.Sequential(Residual_block(nb_filts=filts[1], first=True)),
+            nn.Sequential(Residual_block(nb_filts=filts[2])),
+            nn.Sequential(Residual_block(nb_filts=filts[3])),
+            nn.Sequential(Residual_block(nb_filts=filts[4])),
+        )
+        self.linear = nn.Linear(model_dim * 2, 23 * 29)
+        
+    def extract_feature(self, x):
+        if next(self.model.parameters()).device != x.device \
+            or next(self.model.parameters()).dtype != x.dtype:
+            self.model.to(x.device, dtype=x.dtype)
+            self.model.train()
+        emb = self.model(x, mask=False, features_only=True)['x']
+        return emb
+    
+    def forward(self, x):
+        x = self.extract_feature(x)
+        x = x.transpose(1, 2).unsqueeze(1) # [batch, 1, seq, dim]
+        x = self.encoder(x)
+        x = x.view(x.size(0), x.size(1), -1)
+        x = self.linear(x)
+        x = x.view(x.size(0), x.size(1), 23, 29)
+        return x
+
+
+class S3PRL(nn.Module):
+    def __init__(self, device, model_label, model_dim):
+        super(S3PRL, self).__init__()
+        if S3PRLUpstream is None:
+            raise ModuleNotFoundError("s3prl is not found, likely not installed, please install use `pip`")
+
+        filts = [70, [1, 32], [32, 32], [32, 64], [64, 64]]
+
+        self.sample_rate = 16000 # only 16000 setting is supported
+        if model_label == "mms":
+            self.model = S3PRLUpstream(
+                "hf_wav2vec2_custom",
+                path_or_url="facebook/mms-300m",
+            ).to(device)
+            print("Model has been sent to", device)
+        else:
+            self.model = S3PRLUpstream(model_label).to(device)
+            print("Model has been sent to", device)
+
+        self.encoder = nn.Sequential(
+            nn.Sequential(Residual_block(nb_filts=filts[1], first=True)),
+            nn.Sequential(Residual_block(nb_filts=filts[2])),
+            nn.Sequential(Residual_block(nb_filts=filts[3])),
+            nn.Sequential(Residual_block(nb_filts=filts[4])),
+        )
+        self.linear = nn.Linear(model_dim * 2 * 64, 1) # match the output shape of the rawnet encoder
+
+    def forward(self, x):
+        print(x.size()) # expected: torch.Size([batch, 64000])
+        x_lens = torch.LongTensor(x.size(0)).to(x.device)
+        x, _ = self.model(x, x_lens)
+        x = x[-1].transpose(1, 2).unsqueeze(1) # take the last hidden states
+        # print(x.size())
+        x = self.encoder(x)
+        # print(x.size())
+        x = x.view(x.size(0), -1)
+        # print(x.size())
+        x = self.linear(x)
+        x = x.view(x.size(0), 1)
+        return x
 
 class SVDDModel(nn.Module):
     def __init__(self, device, frontend=None):
         super(SVDDModel, self).__init__()
-        assert frontend in ["rawnet", "lfcc"], "Invalid frontend"
+        assert frontend in ["rawnet", "spectrogram", "mel-spectrogram", "lfcc", "mfcc", "hubert", "mms", "xlsr", "mrhubert", "wavlablm"], "Invalid frontend"
         if frontend == "rawnet":
             # This follows AASIST's implementation
             self.frontend = SincConv(out_channels=70, kernel_size=128, in_channels=1)
+        elif frontend == "spectrogram":
+            self.frontend = Spectrogram(
+                device=device,
+                sample_rate=16000,
+                n_fft=512,
+                win_length=512,
+                hop_length=160,
+                power=2,
+                normalized=True,
+            )
+        elif frontend == "mel-spectrogram":
+            self.frontend = MelSpectrogram(
+                device=device,
+                sample_rate=16000,
+                n_mels=80,
+                n_fft=512,
+                win_length=512,
+                hop_length=160,
+            )
         elif frontend == "lfcc":
             self.frontend = LFCC(
                 device=device,
@@ -253,6 +467,49 @@ class SVDDModel(nn.Module):
                     "center": False,
                 },
             )
+        elif frontend == "mfcc":
+            self.frontend = MFCC(
+                device=device,
+                sample_rate=16000,
+                n_mfcc=40,
+                melkwargs={
+                    "n_fft": 512,
+                    "win_length": 512,
+                    "hop_length": 160,
+                    "center": False,
+                },
+            )
+        elif frontend == "hubert":
+            self.frontend = S3PRL(
+                device=device,
+                model_label="hubert",
+                model_dim=768,
+            )
+        elif frontend == "xlsr":
+            self.frontend = SSLFrontend(
+                device=device,
+                model_label="xlsr",
+                model_dim=1024,
+            )
+            print("after frontend")
+        elif frontend == "mrhubert":
+            self.frontend = S3PRL(
+                device=device,
+                model_label="multires_hubert_multilingual_large600k",
+                model_dim=1024,
+            )
+        elif frontend == "wavlablm":
+            self.frontend = S3PRL(
+                device=device,
+                model_label="wavlablm_ms_40k",
+                model_dim=1024,
+            )
+        elif frontend == "mms":
+            self.frontend = S3PRL(
+                device=device,
+                model_label="mms",
+                model_dim=1024,
+            )
 
         self.backend = AASIST()
     
@@ -260,3 +517,31 @@ class SVDDModel(nn.Module):
         x = self.frontend(x)
         x = self.backend(x)
         return x
+
+if __name__ == "__main__":
+    x = torch.randn(4, 64000)
+    
+    print("Testing RawNet Encoder")
+    model = SVDDModel(frontend="rawnet")
+    _, output = model(x)
+    print(output.shape) # expected: torch.Size([4, 2])
+    
+    print("Testing Spectrogram Encoder")
+    model = SVDDModel(frontend="spectrogram")
+    _, output = model(x)
+    print(output.shape) # expected: torch.Size([4, 1])
+    
+    print("Testing Mel-Spectrogram Encoder")
+    model = SVDDModel(frontend="mel-spectrogram")
+    _, output = model(x)
+    print(output.shape) # expected: torch.Size([4, 1])
+    
+    print("Testing LFCC Encoder")
+    model = SVDDModel(frontend="lfcc")
+    _, output = model(x)
+    print(output.shape) # expected: torch.Size([4, 1])
+    
+    print("Testing MFCC Encoder")
+    model = SVDDModel(frontend="mfcc")
+    _, output = model(x)
+    print(output.shape) # expected: torch.Size([4, 1])
