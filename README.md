@@ -7,7 +7,7 @@ Datasets: [[CtrSVDD (Train+Dev Set)](https://zenodo.org/records/10467648)] [[Ctr
 This repository contains the baseline system implementations for the SVDD Challenge 2024. To form a comprehensive evaluation, we implemented the front-end features, back-end systems, and evaluation metrics. The baseline systems are implemented in Python and are available as open-source software.
 
 ## Updates
-[Sep 2024] Our WildSVDD challenge proposal has been accepted by MIREX@ISMIR 2024. Stay tuned on the [challenge website](https://www.music-ir.org/mirex/wiki/2024:Singing_Voice_Deepfake_Detection)!
+[Sep 2024] Our WildSVDD challenge proposal has been accepted by MIREX@ISMIR 2024. Check out the [challenge website](https://www.music-ir.org/mirex/wiki/2024:Singing_Voice_Deepfake_Detection)!
 
 [Aug 2024] Our SVDD challenge overview paper has been accepted by [SLT 2024](https://arxiv.org/abs/2408.16132).
 
