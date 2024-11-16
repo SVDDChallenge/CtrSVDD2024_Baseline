@@ -42,7 +42,7 @@ The main functions in `train` and `eval` specify more options that you can tune.
 
 Within `base_dir`, the code expects to see `train_set`, `dev_set` and `test_set` directories, along with `train.txt` and `dev.txt` as open-sourced. `train_set`, `dev_set` and `test_set` should directly contain `*.flac` files.
 
-# Visualize Training Logs of Provided Baseline Systems
+### Visualize Training Logs of Provided Baseline Systems
 Run the following command within the CtrSVDD2024_Baseline directory.
 
 ```bash
@@ -50,3 +50,22 @@ pip install tensorboard
 tensorboard --logdir weights/training_logs
 ```
 
+## Citations
+```
+@inproceedings{zang24_interspeech,
+  title     = {{CtrSVDD}: A Benchmark Dataset and Baseline Analysis for Controlled Singing Voice Deepfake Detection},
+  author    = {Yongyi Zang and Jiatong Shi and You Zhang and Ryuichi Yamamoto and Jionghao Han and Yuxun Tang and Shengyuan Xu and Wenxiao Zhao and Jing Guo and Tomoki Toda and Zhiyao Duan},
+  year      = {2024},
+  booktitle = {Proc. Interspeech},
+  pages     = {4783--4787},
+  doi       = {10.21437/Interspeech.2024-2242},
+  issn      = {2958-1796},
+}
+
+@inproceedings{zhang2024svdd,
+  title={{SVDD} 2024: The inaugural singing voice deepfake detection challenge},
+  author={Zhang, You and Zang, Yongyi and Shi, Jiatong and Yamamoto, Ryuichi and Toda, Tomoki and Duan, Zhiyao},
+  booktitle ={Proc. IEEE Spoken Language Technology Workshop (SLT)},
+  year={2024}
+}
+```
